@@ -13,12 +13,13 @@ require(doSNOW)
 cl <- makeCluster(10)
 registerDoSNOW(cl)
 
-source(here('IPMresi', 'code', 'IPMresi_SoaySheepIPMfunctions.R'))
+source(here('IPMresi', 'code', 'MatrixImage.R'))
+source(here('IPMresi', 'code', 'IPMresi_SummerSuckersIPMfunctions.R'))
 
 ## Calculate resilience metrics across a range of number of mesh points: -------
-min.size <- 1.60
-max.size <- 3.70
-# model parameters for building the kernel are stored in m.par.true
+min.size <- 0.00
+max.size <- 600.00
+# model parameters for building the kernel are stored in ss_m_par
 
 # test set:
 n_bins<- seq(2,82, by=5)
@@ -33,17 +34,17 @@ output<- data.frame(Nbins=n_bins,
 for (i in 1:length(n_bins)){
   cat(i, '\n')
   # generate the kernel at this number of bins:
-  thisK<- mk_K(n_bins[i], m.par.true, min.size, max.size)
+  thisK<- make_K_suckers(n_bins[i], ss_m_par, min.size, max.size)
 
   # Calculate the resilience metrics from popdemo:
-  output$AmplificationFirst[i]<- popdemo::reac(thisK$K, bound='upper')
-  output$AmplificationMax[i]<- popdemo::maxamp(thisK$K)
-  output$AttenuationFirst[i]<- popdemo::reac(thisK$K, bound='lower')
-  output$AttenuationMax[i]<- popdemo::maxatt(thisK$K)
-  output$RecoveryTime[i]<- max(popdemo::convt(thisK$K))
+  output$AmplificationFirst[i]<- popdemo::reac(thisK, bound='upper')
+  output$AmplificationMax[i]<- popdemo::maxamp(thisK)
+  output$AttenuationFirst[i]<- popdemo::reac(thisK, bound='lower')
+  output$AttenuationMax[i]<- popdemo::maxatt(thisK)
+  output$RecoveryTime[i]<- max(popdemo::convt(thisK))
 }
 
-png(filename=here('IPMresi', 'results', 'SoaySheep_NbinsResilience2.png'),
+png(filename=here('IPMresi', 'results', 'SummerSuckers_NbinsResilience_linegraph.png'),
     height=10, width=7, units='in', res = 300)
 par(mfrow=c(3,2))
 
@@ -80,10 +81,6 @@ reac_with_gaussian_vectors<- function(Amat, nbins, sd){
 
 # Heat map plots:
 
-min.size <- 1.60
-max.size <- 3.70
-# model parameters for building the kernel are stored in m.par.true
-
 # test set:
 n_bins<- seq(2,300, by=5)
 sd_vals<- seq(0.25, 2, by=0.25)
@@ -98,27 +95,67 @@ results<- foreach(i=1:length(testgrid$n_bins), .combine = rbind,
                   .options.snow = opts) %dopar% {
 
   # generate the kernel at this number of bins:
-  thisK<- mk_K(testgrid$n_bins[i], m.par.true, min.size, max.size)
+  thisK<- make_K_suckers(testgrid$n_bins[i], ss_m_par, min.size, max.size)
 
-  thisoutput<- reac_with_gaussian_vectors(thisK$K, testgrid$n_bins[i], testgrid$sd_vals[i])
+  thisoutput<- reac_with_gaussian_vectors(thisK, testgrid$n_bins[i], testgrid$sd_vals[i])
 }
 
 temp<- as.data.frame(results)
-upper<- unlist(temp$upper)
-lower<- unlist(temp$lower)
+testgrid$upper<- unlist(temp$upper)
+testgrid$lower<- unlist(temp$lower)
 
-png(here('IPMresi', 'results', 'SoaySheepExample_AmplificationFirst_levelplot.png'),
+png(here('IPMresi', 'results', 'SummerSuckersExample_AmplificationFirst_levelplot.png'),
     height=5, width=5, units='in', res=300)
 
-lattice::levelplot(upper~testgrid$n_bins+testgrid$sd_vals, xlab='N bins', ylab='SD of Gaussian',
+lattice::levelplot(upper~n_bins+sd_vals, data=testgrid, xlab='N bins', ylab='SD of Gaussian',
                    main='Amplification (1st time step)')
+
 dev.off()
 
-png(here('IPMresi', 'results', 'SoaySheepExample_AttenuationFirst_levelplot.png'),
+# For attenuation, values greater than 1 mean that the algorithm doesn't work at all - let's make those NA
+testgrid$lower[testgrid$lower>1]<- NA
+
+png(here('IPMresi', 'results', 'SummerSuckersExample_AttenuationFirst_levelplot.png'),
     height=5, width=5, units='in', res=300)
 
-lattice::levelplot(lower~testgrid$n_bins+testgrid$sd_vals, xlab='N bins', ylab='SD of Gaussian',
-                   main='Attenuation (1st time step)')
-
+lattice::levelplot(log10(lower)~n_bins+sd_vals, data=testgrid,
+                   xlab='N bins', ylab='SD of Gaussian', main='log10[Attenuation (1st time step)]')
 dev.off()
+
+## Extend the plots for the first-time-step metrics: ---------------------------
+
+min.size <- 0.00
+max.size <- 600.00
+# model parameters for building the kernel are stored in ss_m_par
+
+# test set:
+n_bins<- seq(2,500, by=5)
+# initialize output:
+output<- data.frame(Nbins=n_bins,
+                    AmplificationFirst=vector(length=length(n_bins)),
+                    AttenuationFirst=vector(length=length(n_bins)))
+
+for (i in 1:length(n_bins)){
+  cat(i, '\n')
+  # generate the kernel at this number of bins:
+  thisK<- make_K_suckers(n_bins[i], ss_m_par, min.size, max.size)
+
+  # Calculate the resilience metrics from popdemo:
+  output$AmplificationFirst[i]<- popdemo::reac(thisK, bound='upper')
+  output$AttenuationFirst[i]<- popdemo::reac(thisK, bound='lower')
+}
+
+png(filename=here('IPMresi', 'results', 'SummerSuckers_NbinsExtended_ResilienceFirstTimeStep.png'),
+    height=5, width=10, units='in', res = 300)
+par(mfrow=c(1,2))
+
+plot(AmplificationFirst~Nbins, data=output, type='l', log='y',
+     xlab='Number of bins', ylab='Amplification (1st timestep)')
+plot(AttenuationFirst~Nbins, data=output, type='l', log='y',
+     xlab='Number of bins', ylab='Attenuation (1st timestep)')
+dev.off()
+
+
+
+
 
